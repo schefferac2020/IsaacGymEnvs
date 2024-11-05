@@ -33,6 +33,7 @@ import torch
 import xml.etree.ElementTree as ET
 
 from isaacgym import gymutil, gymtorch, gymapi
+from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import to_torch, torch_rand_float, tensor_clamp, torch_random_dir_2
 from .base.vec_task import VecTask
@@ -66,8 +67,10 @@ class BallIntercept(VecTask):
 
         sensors_per_env = 3
         actors_per_env = 1
-        dofs_per_env = 6
+        dofs_per_env = 4
         bodies_per_env = 7 + 1
+        
+        self.a = 0
 
         # Observations:
         # 0:3 - activated DOF positions
@@ -86,18 +89,25 @@ class BallIntercept(VecTask):
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
 
         self.root_tensor = self.gym.acquire_actor_root_state_tensor(self.sim)
-        print("This is the root tensor:", self.root_tensor.shape)
+        self.dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
+        # self.sensor_tensor = self.gym.acquire_force_sensor_tensor(self.sim)
+                
+        vec_root_tensor = gymtorch.wrap_tensor(self.root_tensor).view(self.num_envs, -1, 13)
+        vec_dof_tensor = gymtorch.wrap_tensor(self.dof_state_tensor).view(self.num_envs, dofs_per_env, 2)
+        self.dof_positions = vec_dof_tensor[..., 0]
+        self.dof_velocities = vec_dof_tensor[..., 1]
         # self.dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         # print("This is the dof_state_tensor:", self.dof_state_tensor.shape)
         # self.sensor_tensor = self.gym.acquire_force_sensor_tensor(self.sim)
         # print("This is the sensor_tensor:", self.sensor_tensor.shape)
         
 
-        vec_root_tensor = gymtorch.wrap_tensor(self.root_tensor).view(self.num_envs, -1, 13)
+        
         # vec_dof_tensor = gymtorch.wrap_tensor(self.dof_state_tensor).view(self.num_envs, dofs_per_env, 2)
         # vec_sensor_tensor = gymtorch.wrap_tensor(self.sensor_tensor).view(self.num_envs, sensors_per_env, 6)
 
         self.root_states = vec_root_tensor
+        # self.base_pos = 
         self.tray_positions = vec_root_tensor[..., 0, 0:3] # TODO: Meaningless
         self.ball_positions = vec_root_tensor[..., 1, 0:3] # T
         self.ball_orientations = vec_root_tensor[..., 1, 3:7]
@@ -124,6 +134,7 @@ class BallIntercept(VecTask):
 
         # vis
         self.axes_geom = gymutil.AxesGeometry(0.2)
+        
 
     def create_sim(self):
         self.dt = self.sim_params.dt
@@ -245,14 +256,20 @@ class BallIntercept(VecTask):
         
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
-        cartpole_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
-        self.num_dof = self.gym.get_asset_dof_count(cartpole_asset)
+        self.robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        body_names = self.gym.get_asset_rigid_body_names(self.robot_asset)
+        self.num_bodies = len(body_names)
+        self.dof_names = self.gym.get_asset_dof_names(self.robot_asset)
+        self.num_dof = self.gym.get_asset_dof_count(self.robot_asset)
+        
         
         print("This is the number of DOFs:", self.num_dof)
+        print("Num bodies:", self.num_bodies)
+        print("DOF Names:", self.dof_names)
         
+        # asset is rotated z-up by default, no additional rotations needed
         pose = gymapi.Transform()
         pose.p.z = 0.13
-        # asset is rotated z-up by default, no additional rotations needed
         pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
 
         # create ball asset
@@ -262,42 +279,79 @@ class BallIntercept(VecTask):
         ball_asset = self.gym.create_sphere(self.sim, self.ball_radius, ball_options)
 
         self.envs = []
-        self.cartpole_handles = []
-        self.obj_handles = []
+        self.robot_actor_handles = []
+        self.robot_rigid_body_idxs = []
+        self.robot_actor_idxs = []
+        
+        self.object_actor_idxs = []
+        self.object_rigid_body_idxs = []
+        self.object_actor_handles = []
+        
+        
         for i in range(self.num_envs):
             # create env instance
-            env_ptr = self.gym.create_env(
-                self.sim, lower, upper, num_per_row
-            )
+            env_handle = self.gym.create_env(self.sim, lower, upper, num_per_row)
             
-            cartpole_handle = self.gym.create_actor(env_ptr, cartpole_asset, pose, "cartpole", i, 0, 0)
-            dof_props = self.gym.get_actor_dof_properties(env_ptr, cartpole_handle)
+            # Add robots
+            # rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
+            # self.gym.set_asset_rigid_shape_properties(self.robot_asset, rigid_shape_props)
+            
+            robot_handle = self.gym.create_actor(env_handle, self.robot_asset, pose, "robot", i, 0, 0)
+            for bi in body_names:
+                self.robot_rigid_body_idxs.append(self.gym.find_actor_rigid_body_handle(env_handle, robot_handle, bi))
+            dof_props = self.gym.get_actor_dof_properties(env_handle, robot_handle)
             dof_props['driveMode'][0] = gymapi.DOF_MODE_EFFORT
             dof_props['driveMode'][1] = gymapi.DOF_MODE_NONE
             dof_props['stiffness'][:] = 0.0
             dof_props['damping'][:] = 0.0
-            self.gym.set_actor_dof_properties(env_ptr, cartpole_handle, dof_props)
+            self.gym.set_actor_dof_properties(env_handle, robot_handle, dof_props)
+            body_props = self.gym.get_actor_rigid_body_properties(env_handle, robot_handle)
+            # body_props = self._process_rigid_body_props(body_props, i)
+            self.gym.set_actor_rigid_body_properties(env_handle, robot_handle, body_props, recomputeInertia=True)
+            
+            self.robot_actor_handles.append(robot_handle)
+            self.robot_actor_idxs.append(self.gym.get_actor_index(env_handle, robot_handle, gymapi.DOMAIN_SIM))
+            
 
+            # For Ball
             ball_pose = gymapi.Transform()
             ball_pose.p.x = 0.2
             ball_pose.p.z = 2.0
-            ball_handle = self.gym.create_actor(env_ptr, ball_asset, ball_pose, "ball", i, 0, 0)
-            self.obj_handles.append(ball_handle)
+            ball_handle = self.gym.create_actor(env_handle, ball_asset, ball_pose, "ball", i, 0, 0)
+            ball_idx = self.gym.get_actor_rigid_body_index(env_handle, ball_handle, 0, gymapi.DOMAIN_SIM)
+            
+            self.gym.set_rigid_body_color(env_handle, ball_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.99, 0.66, 0.25))
+            ball_body_props = self.gym.get_actor_rigid_body_properties(env_handle, ball_handle)
+            ball_body_props[0].mass = 0.318*(np.random.rand()*0.3+0.5)
+            self.gym.set_actor_rigid_body_properties(env_handle, ball_handle, ball_body_props, recomputeInertia=True)
+            self.object_actor_handles.append(ball_handle)
+            self.object_rigid_body_idxs.append(ball_idx)
+            self.object_actor_idxs.append(self.gym.get_actor_index(env_handle, ball_handle, gymapi.DOMAIN_SIM))
 
-            # pretty colors
-            self.gym.set_rigid_body_color(env_ptr, ball_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.99, 0.66, 0.25))
-            # self.gym.set_rigid_body_color(env_ptr, bbot_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.48, 0.65, 0.8))
-            # for j in range(1, 7):
-            #     self.gym.set_rigid_body_color(env_ptr, bbot_handle, j, gymapi.MESH_VISUAL, gymapi.Vec3(0.15, 0.2, 0.3))
-
-            self.envs.append(env_ptr)
-            # self.bbot_handles.append(bbot_handle)
+            self.envs.append(env_handle)
+        
+        self.robot_actor_idxs = torch.Tensor(self.robot_actor_idxs).to(device=self.device,dtype=torch.long)
+        self.object_actor_idxs = torch.Tensor(self.object_actor_idxs).to(device=self.device,dtype=torch.long)
+        self.object_rigid_body_idxs = torch.Tensor(self.object_rigid_body_idxs).to(device=self.device,dtype=torch.long)
 
     def compute_observations(self):
+        '''These are the observations that are sent into the MLP that is optimized'''
         #print("~!~!~!~! Computing obs")
 
         actuated_dof_indices = torch.tensor([1, 3, 5], device=self.device)
         #print(self.dof_states[:, actuated_dof_indices, :])
+        
+        # print("Right before")
+        # Pan Angle: self.dof_positions[0][2]
+        # Tilt Angle: self.dof_positions[0][3]
+        
+        # Get Transform from Ball to world
+        T_WB = np.eye(4)
+        T_WB[:3, 3] = self.ball_positions[0].cpu()
+        
+        print("This is the position of the bot", self.dof_positions[0][0:2])
+        
+        print("This is a ball_position:", self.ball_positions[0])
 
         self.obs_buf[..., 0:3] = 0 #self.dof_positions[..., actuated_dof_indices]
         self.obs_buf[..., 3:6] = 0 #self.dof_velocities[..., actuated_dof_indices]
@@ -364,11 +418,27 @@ class BallIntercept(VecTask):
         self.progress_buf[env_ids] = 0
 
     def pre_physics_step(self, _actions):
-
+        '''
+        This is where the actions are applied to the robot
+        '''
+        
+        
         # resets
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         if len(reset_env_ids) > 0:
             self.reset_idx(reset_env_ids)
+            
+        # print("This is the size of the actions: ", _actions.shape)
+        _actions[:, (0, 1)] = 0.3 # Make it so the robot can't move
+        
+        if self.a < 3:
+            _actions[:, 2] = 0.0 # Pan
+            _actions[:, 3] = 0 # Tilt
+        else:
+            _actions[:, 2] = 0 # Pan
+            _actions[:, 3] = 0 # Tilt
+            
+        self.a += 1
 
         # actions = _actions.to(self.device)
 
@@ -397,26 +467,15 @@ class BallIntercept(VecTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_force_sensor_tensor(self.sim)
+        
+        
+        # Prepare quantities
+        # self.base_pos[:]
+        
+        
 
         self.compute_observations()
         self.compute_reward()
-
-        # vis
-        # if self.viewer and self.debug_viz:
-        #     self.gym.clear_lines(self.viewer)
-        #     for i in range(self.num_envs):
-        #         env = self.envs[i]
-        #         bbot_handle = self.bbot_handles[i]
-        #         body_handles = []
-        #         body_handles.append(self.gym.find_actor_rigid_body_handle(env, bbot_handle, "upper_leg0"))
-        #         body_handles.append(self.gym.find_actor_rigid_body_handle(env, bbot_handle, "upper_leg1"))
-        #         body_handles.append(self.gym.find_actor_rigid_body_handle(env, bbot_handle, "upper_leg2"))
-
-        #         for lhandle in body_handles:
-        #             lpose = self.gym.get_rigid_transform(env, lhandle)
-        #             gymutil.draw_lines(self.axes_geom, self.gym, self.viewer, env, lpose)
-
-
 #####################################################################
 ###=========================jit functions=========================###
 #####################################################################
