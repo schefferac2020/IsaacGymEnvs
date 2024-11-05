@@ -333,12 +333,33 @@ class BallIntercept(VecTask):
         self.robot_actor_idxs = torch.Tensor(self.robot_actor_idxs).to(device=self.device,dtype=torch.long)
         self.object_actor_idxs = torch.Tensor(self.object_actor_idxs).to(device=self.device,dtype=torch.long)
         self.object_rigid_body_idxs = torch.Tensor(self.object_rigid_body_idxs).to(device=self.device,dtype=torch.long)
+        self.robot_rigid_body_idxs = torch.Tensor(self.robot_rigid_body_idxs).to(device=self.device,dtype=torch.long)
+        
+        print("These are the rigid body idxs:", self.robot_rigid_body_idxs)
+        print("These are the rigid body idxs:", self.robot_rigid_body_idxs.shape)
+        
+        self.initialize_sensors()
+        
+    def initialize_sensors(self):
+        '''Initialize the Sensors
+        
+        populates teh self.sensors array
+        '''
+        
+        from .sensors import ALL_SENSORS
 
+        self.sensors = []
+        
+        sensor_names = ["ObjectSensor"] #TODO: Make this a cfg
+        sensor_args = {} #TODO: This likely is not right
+        for sensor_name in sensor_names:
+            if sensor_name in ALL_SENSORS.keys():
+                self.sensors.append(ALL_SENSORS[sensor_name](self, **sensor_args))
+        
     def compute_observations(self):
         '''These are the observations that are sent into the MLP that is optimized'''
         #print("~!~!~!~! Computing obs")
 
-        actuated_dof_indices = torch.tensor([1, 3, 5], device=self.device)
         #print(self.dof_states[:, actuated_dof_indices, :])
         
         # print("Right before")
@@ -349,9 +370,32 @@ class BallIntercept(VecTask):
         T_WB = np.eye(4)
         T_WB[:3, 3] = self.ball_positions[0].cpu()
         
-        print("This is the position of the bot", self.dof_positions[0][0:2])
         
-        print("This is a ball_position:", self.ball_positions[0])
+        print("These are the base positions:", self.root_states[0, 0, 0:3])
+        
+        # Get the rigid body states tensor
+        rb_states_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
+        rb_states = gymtorch.wrap_tensor(rb_states_tensor).view(self.num_envs, -1, 13)
+        print("This is the shape of the rigid bodies tensor:", rb_states.shape)
+        
+        # Rigid Bodies in this order = ['Slider1', 'Slider2', 'cart', 'camera_mount', 'camera', 'red_spot', 'ball'] # TODO: verify
+        # rigid_body_names = self.gym.get_actor_rigid_body_names(self.envs[0], self.robot_actor_handles[0])
+        # print(f"Rigid body names: {rigid_body_names}")
+        cam_idx = 4
+        camera_pos, camera_quat = rb_states[...,cam_idx,0:3], rb_states[...,cam_idx,3:7]
+        print("Position of the cam in world frame:", camera_pos[0].cpu())
+        print("Rotation of the cam in world frame:", camera_quat[0].cpu())
+        
+        # robotasset or robot handle?
+        # poses = self.gym.get_actor_rigid_body_states(self.envs[0], self.robot_actor_handles[0], gymapi.STATE_POS)#['pose']
+        # print("Anything after")
+        # print("These are the poses:", poses.shape)
+        
+        # print("This is the position of the bot", self.dof_positions[0][0:2])
+        
+        # print("This is a ball_position:", self.ball_positions[0])
+        
+        # print(self.sensors[0].get_observation(), "I think this is the position of the ball")
 
         self.obs_buf[..., 0:3] = 0 #self.dof_positions[..., actuated_dof_indices]
         self.obs_buf[..., 3:6] = 0 #self.dof_velocities[..., actuated_dof_indices]
