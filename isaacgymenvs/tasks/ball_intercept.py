@@ -81,7 +81,7 @@ class BallIntercept(VecTask):
         # 15:18 - sensor torque 1
         # 18:21 - sensor torque 2
         # 21:24 - sensor torque 3
-        self.cfg["env"]["numObservations"] = 24
+        self.cfg["env"]["numObservations"] = 3
 
         # Actions: target velocities for the 3 actuated DOFs
         self.cfg["env"]["numActions"] = 4
@@ -281,32 +281,35 @@ class BallIntercept(VecTask):
         # T_WB = np.eye(4)
         # T_WB[:3, 3] = self.ball_positions[0].cpu()
         
+        self.pre_obs_buf = []
         for sensor in self.sensors:
-            print("----- Getting an OBSERVATION -----")
-            obs = sensor.get_observation()
-            print("This is the shape of the obs:", obs.shape)
-            print("One row of the observation", obs[0])
+            self.pre_obs_buf += [sensor.get_observation()]
+            
+        self.pre_obs_buf = torch.reshape(torch.cat(self.pre_obs_buf, dim=-1), (self.num_envs, -1))
+        self.obs_buf[:] = self.pre_obs_buf
             
 
-        self.obs_buf[..., 0:3] = 0 #self.dof_positions[..., actuated_dof_indices]
-        self.obs_buf[..., 3:6] = 0 #self.dof_velocities[..., actuated_dof_indices]
-        self.obs_buf[..., 6:9] = self.ball_positions
-        self.obs_buf[..., 9:12] = self.ball_linvels
-        self.obs_buf[..., 12:15] = 0 #self.sensor_forces[..., 0] / 20  # !!! lousy normalization
-        self.obs_buf[..., 15:18] = 0 #self.sensor_torques[..., 0] / 20  # !!! lousy normalization
-        self.obs_buf[..., 18:21] = 0 #self.sensor_torques[..., 1] / 20  # !!! lousy normalization
-        self.obs_buf[..., 21:24] = 0 #self.sensor_torques[..., 2] / 20  # !!! lousy normalization
+        # self.obs_buf[..., 0:3] = 0 #self.dof_positions[..., actuated_dof_indices]
+        # self.obs_buf[..., 3:6] = 0 #self.dof_velocities[..., actuated_dof_indices]
+        # self.obs_buf[..., 6:9] = self.ball_positions
+        # self.obs_buf[..., 9:12] = self.ball_linvels
+        # self.obs_buf[..., 12:15] = 0 #self.sensor_forces[..., 0] / 20  # !!! lousy normalization
+        # self.obs_buf[..., 15:18] = 0 #self.sensor_torques[..., 0] / 20  # !!! lousy normalization
+        # self.obs_buf[..., 18:21] = 0 #self.sensor_torques[..., 1] / 20  # !!! lousy normalization
+        # self.obs_buf[..., 21:24] = 0 #self.sensor_torques[..., 2] / 20  # !!! lousy normalization
 
         return self.obs_buf
 
     def compute_reward(self):
+        image_position = self.obs_buf[..., 0:3]
+        
         self.rew_buf[:], self.reset_buf[:] = compute_bbot_reward(
-            self.tray_positions,
+            image_position,
             self.ball_positions,
-            self.ball_linvels,
             self.ball_radius,
-            self.reset_buf, self.progress_buf, self.max_episode_length
-        )
+            self.reset_buf, 
+            self.progress_buf, 
+            self.max_episode_length)
 
     def reset_idx(self, env_ids):
         num_resets = len(env_ids)
@@ -365,29 +368,6 @@ class BallIntercept(VecTask):
             
         # print("This is the size of the actions: ", _actions.shape)
         _actions[:, (0, 1)] = 0.0 # Make it so the robot can't move
-        
-        if self.a < 3:
-            _actions[:, 2] = 0.0 # Pan
-            _actions[:, 3] = 0 # Tilt
-        else:
-            _actions[:, 2] = 0 # Pan
-            _actions[:, 3] = 0 # Tilt
-            
-        self.a += 1
-
-        # actions = _actions.to(self.device)
-
-        # actuated_indices = torch.LongTensor([1, 3, 5])
-        
-        # actions_tensor = torch.zeros(self.num_envs * self.num_dof, device=self.device, dtype=torch.float)
-        # actions_tensor[::self.num_dof] = actions.to(self.device).squeeze() * self.max_push_effort
-
-        # update position targets from actions
-        # self.dof_position_targets[..., actuated_indices] += self.dt * self.action_speed_scale * actions
-        # self.dof_position_targets[:] = tensor_clamp(self.dof_position_targets, self.bbot_dof_lower_limits, self.bbot_dof_upper_limits)
-
-        # reset position targets for reset envs
-        # self.dof_position_targets[reset_env_ids] = 0
 
         # self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_position_targets))
         actions_tensor = torch.zeros(self.num_envs * self.num_dof, device=self.device, dtype=torch.float)        
@@ -420,21 +400,20 @@ class BallIntercept(VecTask):
 
 
 @torch.jit.script
-def compute_bbot_reward(tray_positions, ball_positions, ball_velocities, ball_radius, reset_buf, progress_buf, max_episode_length):
-    # type: (Tensor, Tensor, Tensor, float, Tensor, Tensor, float) -> Tuple[Tensor, Tensor]
+def compute_bbot_reward(ball_pos_in_iamge, ball_positions, ball_radius, reset_buf, progress_buf, max_episode_length):
+    # type: (Tensor, Tensor, float, Tensor, Tensor, float) -> Tuple[Tensor, Tensor]
     # calculating the norm for ball distance to desired height above the ground plane (i.e. 0.7)
-    ball_dist = torch.sqrt(ball_positions[..., 0] * ball_positions[..., 0] +
-                           (ball_positions[..., 2] - 0.7) * (ball_positions[..., 2] - 0.7) +
-                           (ball_positions[..., 1]) * ball_positions[..., 1])
-    ball_speed = torch.sqrt(ball_velocities[..., 0] * ball_velocities[..., 0] +
-                            ball_velocities[..., 1] * ball_velocities[..., 1] +
-                            ball_velocities[..., 2] * ball_velocities[..., 2])
-    pos_reward = 1.0 / (1.0 + ball_dist)
-    speed_reward = 1.0 / (1.0 + ball_speed)
-    reward = pos_reward * speed_reward
+    u = ball_pos_in_iamge[...,0]
+    v = ball_pos_in_iamge[...,1]
+    
+    dist_from_center_sq = u*u + v*v + 0.01 #offset param
+    visibility_flag = ball_pos_in_iamge[...,2]
+    
+    reward = (1/dist_from_center_sq)*visibility_flag
+    # print("This is the reward", reward[0])
 
     
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset_buf) # Max Episodes
-    reset = torch.where(ball_positions[..., 2] < ball_radius * 1.5, torch.ones_like(reset_buf), reset) # ball hit ground
+    reset = torch.where(ball_positions[..., 2] < ball_radius +.25 , torch.ones_like(reset_buf), reset) # ball hit ground #TODO: IDK if this is right tho
 
     return reward, reset
