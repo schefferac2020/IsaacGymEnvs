@@ -23,8 +23,8 @@ class PointCameraSensor(Sensor):
         
         # Get the ball pose
         ball_idx = 6
-        # ball_pos_world = rb_states[...,ball_idx,0:3]
-        ball_pos_world = torch.tensor([5.0, 0.0, 5.0], device=rb_states.device).expand(4096, -1) # TODO: Debug, this just set the "ball position to a hardset value for reward function testing"
+        ball_pos_world = rb_states[...,ball_idx,0:3]
+        # ball_pos_world = torch.tensor([5.0, 0.0, 5.0], device=rb_states.device).expand(4096, -1) # TODO: Debug, this just set the "ball position to a hardset value for reward function testing"
         
         # Project ball pose to camera
         camera_quat_inv, camera_pos_inv = tf_inverse(camera_quat, camera_pos)

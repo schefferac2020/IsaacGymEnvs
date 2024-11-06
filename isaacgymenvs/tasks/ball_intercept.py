@@ -333,7 +333,7 @@ class BallIntercept(VecTask):
         min_height = 4.0
         max_height = 5.0
         min_horizontal_speed = 2
-        max_horizontal_speed = 5
+        max_horizontal_speed = 15
 
         dists = torch_rand_float(min_d, max_d, (num_resets, 1), self.device)
         dirs = torch_random_dir_2((num_resets, 1), self.device)
