@@ -11,6 +11,7 @@ from .last_action_sensor import LastActionSensor
 # from .clock_sensor import ClockSensor
 # from .yaw_sensor import YawSensor
 from .object_sensor import ObjectSensor
+from .point_camera_sensor import PointCameraSensor
 # from .timing_sensor import TimingSensor
 # from .body_velocity_sensor import BodyVelocitySensor
 # from .object_velocity_sensor import ObjectVelocitySensor
@@ -20,5 +21,6 @@ from .object_sensor import ObjectSensor
 ALL_SENSORS = { "AttachedCameraSensor": AttachedCameraSensor,
                 "ActionSensor": ActionSensor,
                 "LastActionSensor": LastActionSensor,
-                "ObjectSensor": ObjectSensor
+                "ObjectSensor": ObjectSensor,
+                "PointCameraSensor": PointCameraSensor
             }

@@ -149,96 +149,6 @@ class BallIntercept(VecTask):
         self._create_ground_plane()
         self._create_envs(self.num_envs, self.cfg["env"]['envSpacing'], int(np.sqrt(self.num_envs)))
 
-    def _create_balance_bot_asset(self):
-        # there is an asset balance_bot.xml, here we override some features.
-
-        tray_radius = 0.5
-        tray_thickness = 0.02
-        leg_radius = 0.02
-        leg_outer_offset = tray_radius - 0.1
-        leg_length = leg_outer_offset - 2 * leg_radius
-        leg_inner_offset = leg_outer_offset - leg_length / math.sqrt(2)
-
-        tray_height = leg_length * math.sqrt(2) + 2 * leg_radius + 0.5 * tray_thickness
-
-        root = ET.Element('mujoco')
-        root.attrib["model"] = "BalanceBot"
-        compiler = ET.SubElement(root, "compiler")
-        compiler.attrib["angle"] = "degree"
-        compiler.attrib["coordinate"] = "local"
-        compiler.attrib["inertiafromgeom"] = "true"
-        worldbody = ET.SubElement(root, "worldbody")
-
-        tray = ET.SubElement(worldbody, "body")
-        tray.attrib["name"] = "tray"
-        tray.attrib["pos"] = "%g %g %g" % (0, 0, tray_height)
-        tray_joint = ET.SubElement(tray, "joint")
-        tray_joint.attrib["name"] = "root_joint"
-        tray_joint.attrib["type"] = "free"
-        tray_geom = ET.SubElement(tray, "geom")
-        tray_geom.attrib["type"] = "cylinder"
-        tray_geom.attrib["size"] = "%g %g" % (tray_radius, 0.5 * tray_thickness)
-        tray_geom.attrib["pos"] = "0 0 0"
-        tray_geom.attrib["density"] = "100"
-
-        leg_angles = [0.0, 2.0 / 3.0 * math.pi, 4.0 / 3.0 * math.pi]
-        for i in range(len(leg_angles)):
-            angle = leg_angles[i]
-
-            upper_leg_from = gymapi.Vec3()
-            upper_leg_from.x = leg_outer_offset * math.cos(angle)
-            upper_leg_from.y = leg_outer_offset * math.sin(angle)
-            upper_leg_from.z = -leg_radius - 0.5 * tray_thickness
-            upper_leg_to = gymapi.Vec3()
-            upper_leg_to.x = leg_inner_offset * math.cos(angle)
-            upper_leg_to.y = leg_inner_offset * math.sin(angle)
-            upper_leg_to.z = upper_leg_from.z - leg_length / math.sqrt(2)
-            upper_leg_pos = (upper_leg_from + upper_leg_to) * 0.5
-            upper_leg_quat = gymapi.Quat.from_euler_zyx(0, -0.75 * math.pi, angle)
-            upper_leg = ET.SubElement(tray, "body")
-            upper_leg.attrib["name"] = "upper_leg" + str(i)
-            upper_leg.attrib["pos"] = "%g %g %g" % (upper_leg_pos.x, upper_leg_pos.y, upper_leg_pos.z)
-            upper_leg.attrib["quat"] = "%g %g %g %g" % (upper_leg_quat.w, upper_leg_quat.x, upper_leg_quat.y, upper_leg_quat.z)
-            upper_leg_geom = ET.SubElement(upper_leg, "geom")
-            upper_leg_geom.attrib["type"] = "capsule"
-            upper_leg_geom.attrib["size"] = "%g %g" % (leg_radius, 0.5 * leg_length)
-            upper_leg_geom.attrib["density"] = "1000"
-            upper_leg_joint = ET.SubElement(upper_leg, "joint")
-            upper_leg_joint.attrib["name"] = "upper_leg_joint" + str(i)
-            upper_leg_joint.attrib["type"] = "hinge"
-            upper_leg_joint.attrib["pos"] = "%g %g %g" % (0, 0, -0.5 * leg_length)
-            upper_leg_joint.attrib["axis"] = "0 1 0"
-            upper_leg_joint.attrib["limited"] = "true"
-            upper_leg_joint.attrib["range"] = "-45 45"
-
-            lower_leg_pos = gymapi.Vec3(-0.5 * leg_length, 0, 0.5 * leg_length)
-            lower_leg_quat = gymapi.Quat.from_euler_zyx(0, -0.5 * math.pi, 0)
-            lower_leg = ET.SubElement(upper_leg, "body")
-            lower_leg.attrib["name"] = "lower_leg" + str(i)
-            lower_leg.attrib["pos"] = "%g %g %g" % (lower_leg_pos.x, lower_leg_pos.y, lower_leg_pos.z)
-            lower_leg.attrib["quat"] = "%g %g %g %g" % (lower_leg_quat.w, lower_leg_quat.x, lower_leg_quat.y, lower_leg_quat.z)
-            lower_leg_geom = ET.SubElement(lower_leg, "geom")
-            lower_leg_geom.attrib["type"] = "capsule"
-            lower_leg_geom.attrib["size"] = "%g %g" % (leg_radius, 0.5 * leg_length)
-            lower_leg_geom.attrib["density"] = "1000"
-            lower_leg_joint = ET.SubElement(lower_leg, "joint")
-            lower_leg_joint.attrib["name"] = "lower_leg_joint" + str(i)
-            lower_leg_joint.attrib["type"] = "hinge"
-            lower_leg_joint.attrib["pos"] = "%g %g %g" % (0, 0, -0.5 * leg_length)
-            lower_leg_joint.attrib["axis"] = "0 1 0"
-            lower_leg_joint.attrib["limited"] = "true"
-            lower_leg_joint.attrib["range"] = "-70 90"
-
-        _indent_xml(root)
-        ET.ElementTree(root).write("balance_bot.xml")
-
-        # save some useful robot parameters
-        self.tray_height = tray_height
-        self.leg_radius = leg_radius
-        self.leg_length = leg_length
-        self.leg_outer_offset = leg_outer_offset
-        self.leg_angles = leg_angles
-
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
         plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
@@ -350,14 +260,15 @@ class BallIntercept(VecTask):
 
         self.sensors = []
         
-        sensor_names = ["ObjectSensor"] #TODO: Make this a cfg
+        sensor_names = ["PointCameraSensor"] #TODO: Make this a cfg
         sensor_args = {} #TODO: This likely is not right
         for sensor_name in sensor_names:
             if sensor_name in ALL_SENSORS.keys():
+                print("Initializing this sensor: ", sensor_name)
                 self.sensors.append(ALL_SENSORS[sensor_name](self, **sensor_args))
         
     def compute_observations(self):
-        '''These are the observations that are sent into the MLP that is optimized'''
+        '''These are the observations that are sent into the policy'''
         #print("~!~!~!~! Computing obs")
 
         #print(self.dof_states[:, actuated_dof_indices, :])
@@ -367,35 +278,15 @@ class BallIntercept(VecTask):
         # Tilt Angle: self.dof_positions[0][3]
         
         # Get Transform from Ball to world
-        T_WB = np.eye(4)
-        T_WB[:3, 3] = self.ball_positions[0].cpu()
+        # T_WB = np.eye(4)
+        # T_WB[:3, 3] = self.ball_positions[0].cpu()
         
-        
-        print("These are the base positions:", self.root_states[0, 0, 0:3])
-        
-        # Get the rigid body states tensor
-        rb_states_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
-        rb_states = gymtorch.wrap_tensor(rb_states_tensor).view(self.num_envs, -1, 13)
-        print("This is the shape of the rigid bodies tensor:", rb_states.shape)
-        
-        # Rigid Bodies in this order = ['Slider1', 'Slider2', 'cart', 'camera_mount', 'camera', 'red_spot', 'ball'] # TODO: verify
-        # rigid_body_names = self.gym.get_actor_rigid_body_names(self.envs[0], self.robot_actor_handles[0])
-        # print(f"Rigid body names: {rigid_body_names}")
-        cam_idx = 4
-        camera_pos, camera_quat = rb_states[...,cam_idx,0:3], rb_states[...,cam_idx,3:7]
-        print("Position of the cam in world frame:", camera_pos[0].cpu())
-        print("Rotation of the cam in world frame:", camera_quat[0].cpu())
-        
-        # robotasset or robot handle?
-        # poses = self.gym.get_actor_rigid_body_states(self.envs[0], self.robot_actor_handles[0], gymapi.STATE_POS)#['pose']
-        # print("Anything after")
-        # print("These are the poses:", poses.shape)
-        
-        # print("This is the position of the bot", self.dof_positions[0][0:2])
-        
-        # print("This is a ball_position:", self.ball_positions[0])
-        
-        # print(self.sensors[0].get_observation(), "I think this is the position of the ball")
+        for sensor in self.sensors:
+            print("----- Getting an OBSERVATION -----")
+            obs = sensor.get_observation()
+            print("This is the shape of the obs:", obs.shape)
+            print("One row of the observation", obs[0])
+            
 
         self.obs_buf[..., 0:3] = 0 #self.dof_positions[..., actuated_dof_indices]
         self.obs_buf[..., 3:6] = 0 #self.dof_velocities[..., actuated_dof_indices]
@@ -473,7 +364,7 @@ class BallIntercept(VecTask):
             self.reset_idx(reset_env_ids)
             
         # print("This is the size of the actions: ", _actions.shape)
-        _actions[:, (0, 1)] = 0.3 # Make it so the robot can't move
+        _actions[:, (0, 1)] = 0.0 # Make it so the robot can't move
         
         if self.a < 3:
             _actions[:, 2] = 0.0 # Pan
@@ -505,6 +396,9 @@ class BallIntercept(VecTask):
         self.gym.set_dof_actuation_force_tensor(self.sim, forces)
 
     def post_physics_step(self):
+        # TODO: I don't know why these two lines are required now? 
+        self.gym.simulate(self.sim)
+        self.gym.fetch_results(self.sim, True)
 
         self.progress_buf += 1
 
