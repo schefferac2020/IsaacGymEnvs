@@ -172,6 +172,18 @@ class BallIntercept(VecTask):
         self.dof_names = self.gym.get_asset_dof_names(self.robot_asset)
         self.num_dof = self.gym.get_asset_dof_count(self.robot_asset)
         
+        # Get jiont limits
+        robot_dof_props = self.gym.get_asset_dof_properties(self.robot_asset)
+        self.bbot_dof_lower_limits = []
+        self.bbot_dof_upper_limits = []
+        for i in range(self.num_dof):
+            self.bbot_dof_lower_limits.append(robot_dof_props['lower'][i])
+            self.bbot_dof_upper_limits.append(robot_dof_props['upper'][i])
+
+        self.bbot_dof_lower_limits = to_torch(self.bbot_dof_lower_limits, device=self.device)
+        self.bbot_dof_upper_limits = to_torch(self.bbot_dof_upper_limits, device=self.device)
+        
+        
         
         print("This is the number of DOFs:", self.num_dof)
         print("Num bodies:", self.num_bodies)
@@ -210,10 +222,9 @@ class BallIntercept(VecTask):
             for bi in body_names:
                 self.robot_rigid_body_idxs.append(self.gym.find_actor_rigid_body_handle(env_handle, robot_handle, bi))
             dof_props = self.gym.get_actor_dof_properties(env_handle, robot_handle)
-            dof_props['driveMode'][0] = gymapi.DOF_MODE_EFFORT
-            dof_props['driveMode'][1] = gymapi.DOF_MODE_NONE
-            dof_props['stiffness'][:] = 0.0
-            dof_props['damping'][:] = 0.0
+            dof_props['driveMode'][np.array([0, 1, 2, 3])] = gymapi.DOF_MODE_POS #TODO: Is this right?
+            dof_props['stiffness'][:] = 4000.0
+            dof_props['damping'][:] = 100.0
             self.gym.set_actor_dof_properties(env_handle, robot_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, robot_handle)
             # body_props = self._process_rigid_body_props(body_props, i)
@@ -358,6 +369,9 @@ class BallIntercept(VecTask):
     def pre_physics_step(self, _actions):
         '''
         This is where the actions are applied to the robot
+        
+        
+        we are using a type of velocity control now I think? 
         '''
         
         
@@ -367,13 +381,29 @@ class BallIntercept(VecTask):
             self.reset_idx(reset_env_ids)
             
         # print("This is the size of the actions: ", _actions.shape)
-        _actions[:, (0, 1)] = 0.0 # Make it so the robot can't move
+        # _actions[:, (0, 1)] = 0.0 # Make it so the robot can't move
+        
+        # Use Postion Control
+        actuated_indices = torch.LongTensor([0, 1, 2, 3])
+        # print("this is the size of the DOF position targets", self.dof_position_targets.shape)
+        self.dof_position_targets[..., actuated_indices] += self.dt*self.action_speed_scale*_actions #TODO: what is the action_speed_scale?
+        # print("Example Componentes:", self.dt, self.action_speed_scale, _actions[0])
+        
+        self.dof_position_targets[:] = tensor_clamp(self.dof_position_targets, self.bbot_dof_lower_limits, self.bbot_dof_upper_limits) 
+        # print("self.bbot_dof_lower_limits shape", self.bbot_dof_lower_limits.shape)
 
-        # self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_position_targets))
-        actions_tensor = torch.zeros(self.num_envs * self.num_dof, device=self.device, dtype=torch.float)        
-        actions_tensor[:] = _actions.to(self.device).view(-1) * self.max_push_effort
-        forces = gymtorch.unwrap_tensor(actions_tensor)
-        self.gym.set_dof_actuation_force_tensor(self.sim, forces)
+        self.dof_position_targets[reset_env_ids] = 0
+        
+        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.dof_position_targets))
+        # print("here's an example of some of the postion targets:", self.dof_position_targets[0])
+    
+
+        
+        # Use Force/Torque Control
+        # actions_tensor = torch.zeros(self.num_envs * self.num_dof, device=self.device, dtype=torch.float)        
+        # actions_tensor[:] = _actions.to(self.device).view(-1) * self.max_push_effort
+        # forces = gymtorch.unwrap_tensor(actions_tensor)
+        # self.gym.set_dof_actuation_force_tensor(self.sim, forces)
 
     def post_physics_step(self):
         # TODO: I don't know why these two lines are required now? 
