@@ -1,0 +1,156 @@
+<?xml version="1.0"?>
+<robot name="cartpole">
+
+    <link name="slider1">
+    <visual>
+      <geometry>
+        <box size="0.03 0.03 0.03"/>
+      </geometry>
+      <material name="slider_mat">
+        <color rgba="0.9 0.6 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <link name="slider2">
+    <visual>
+      <geometry>
+        <box size="0.03 0.03 0.03"/>
+      </geometry>
+      <material name="slider_mat">
+        <color rgba="0.9 0.6 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <link name="cart">
+    <visual>
+      <geometry>
+        <box size="0.2 0.25 0.2"/>
+      </geometry>
+      <material name="cart_mat">
+        <color rgba="0.3 0.5 0.7 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+          <box size="0.2 0.25 0.2"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.05"/>
+    </inertial>
+  </link>
+
+  <!-- New camera link -->
+  <link name="camera">
+    <visual>
+      <geometry>
+        <box size="0.05 0.05 0.1"/>
+      </geometry>
+      <material name="camera_mat">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+    <inertial>
+      <mass value="0.1"/>
+    </inertial>
+  </link>
+
+    <link name="camera_mount">
+        <visual>
+        <geometry>
+            <box size="0.05 0.05 0.01"/>
+        </geometry>
+        <material name="mount_mat">
+            <color rgba="0.2 0.2 0.2 1"/>
+        </material>
+        </visual>
+        <inertial>
+        <mass value="0.1"/>
+        </inertial>
+    </link>
+
+  <joint name="cart_to_camera_pan" type="revolute">
+    <axis xyz="0 1 0"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <parent link="cart"/>
+    <child link="camera_mount"/>
+    <limit effort="0.1" lower="-1.57" upper="1.57" velocity="0.01"/>
+  </joint>
+
+  <joint name="camera_mount_to_camera_tilt" type="revolute">
+    <axis xyz="1 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="camera_mount"/>
+    <child link="camera"/>
+    <limit effort="0.1" lower="-1.57" upper="1.57" velocity="0.01"/>
+  </joint>
+
+
+    <link name="red_spot">
+        <visual>
+        <geometry>
+            <sphere radius="0.02"/>
+        </geometry>
+        <material name="red_spot_mat">
+            <color rgba="1 0 0 1"/> <!-- Red color -->
+        </material>
+        </visual>
+        <inertial>
+        <mass value="0.05"/> <!-- Mass of the red spot -->
+        </inertial>
+    </link>
+  
+
+
+  <joint name="cart_to_red_spot" type="fixed">
+    <origin xyz="0.12 0 0.1" rpy="0 0 0"/> <!-- Positioning the red spot in front of the cart -->
+    <parent link="cart"/>
+    <child link="red_spot"/>
+  </joint>
+
+  <!-- <joint name="cart_to_camera_pan" type="revolute">
+    <axis xyz="0 0 1"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <parent link="cart"/>
+    <child link="camera"/>
+    <limit effort="10.0" lower="-1.57" upper="1.57" velocity="1.0"/>
+  </joint>
+
+  <joint name="camera_pan_to_tilt" type="revolute">
+    <axis xyz="1 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="cart_to_camera_pan"/>
+    <child link="camera"/>
+    <limit effort="10.0" lower="-1.57" upper="1.57" velocity="1.0"/>
+  </joint> -->
+
+  <joint name="slider1_to_slider2" type="prismatic">
+    <axis xyz="1 0 0"/>
+    <origin xyz="0 0 0"/>
+    <parent link="slider1"/>
+    <child link="slider2"/>
+    <!-- <limit effort="1000.0" lower="-10" upper="10" velocity="100"/> -->
+    <limit effort="1000.0" lower="0" upper="0" velocity="100"/>
+  </joint>
+
+  <joint name="slider2_to_cart" type="prismatic">
+    <axis xyz="0 1 0"/>
+    <origin xyz="0 0 0"/>
+    <parent link="slider2"/>
+    <child link="cart"/>
+    <!-- <limit effort="1000.0" lower="-10" upper="10" velocity="100"/> -->
+    <limit effort="1000.0" lower="0" upper="0" velocity="100"/>
+  </joint>
+  
+</robot>
+
+
+
+
+
+
+
+
+
