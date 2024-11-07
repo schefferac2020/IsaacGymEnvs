@@ -16,15 +16,14 @@ class AttachedCameraSensor(Sensor):
         if env_ids is None: env_ids = range(self.env.num_envs)
 
         camera_props = gymapi.CameraProperties()
-        camera_props.width = self.env.cfg.perception.image_width
-        camera_props.height = self.env.cfg.perception.image_height
-        camera_props.horizontal_fov = self.env.cfg.perception.image_horizontal_fov
+        camera_props.width = 500 #TODO do this in a config
+        camera_props.height = 500
+        camera_props.horizontal_fov = 110
 
 
         self.cams = []
 
         for env_id in env_ids:
-
             cam = self.env.gym.create_camera_sensor(self.env.envs[env_id], camera_props)
             # initialize camera position
             # attach the camera to the base
@@ -35,7 +34,7 @@ class AttachedCameraSensor(Sensor):
             trans_quat = gymapi.Quat(quat[0], quat[1], quat[2], quat[3])
             transform = gymapi.Transform(trans_pos, trans_quat)
             follow_mode = gymapi.CameraFollowMode.FOLLOW_TRANSFORM
-            self.env.gym.attach_camera_to_body(cam, self.env.envs[env_id], 0, transform, follow_mode)
+            self.env.gym.attach_camera_to_body(cam, self.env.envs[env_id], 4, transform, follow_mode)
 
             self.cams.append(cam)
 
@@ -50,7 +49,7 @@ class AttachedCameraSensor(Sensor):
 
         depth_images = []
         for env_id in env_ids:
-            img = self.env.gym.get_camera_image(self.env.sim, self.env.envs[env_id], self.cams[env_id],
+            img = self.env.gym.get_camera_image(self.env.sim, self.env.envs[env_id], self.cams[0],
                                             gymapi.IMAGE_DEPTH)
             w, h = img.shape
             depth_images.append(torch.from_numpy(img.reshape([1, w, h])).to(self.env.device))
@@ -62,7 +61,7 @@ class AttachedCameraSensor(Sensor):
 
         rgb_images = []
         for env_id in env_ids:
-            img = self.env.gym.get_camera_image(self.env.sim, self.env.envs[env_id], self.cams[env_id],
+            img = self.env.gym.get_camera_image(self.env.sim, self.env.envs[env_id], self.cams[0],
                                             gymapi.IMAGE_COLOR)
             w, h = img.shape
             rgb_images.append(
@@ -75,7 +74,7 @@ class AttachedCameraSensor(Sensor):
 
         segmentation_images = []
         for env_id in env_ids:
-            img = self.env.gym.get_camera_image(self.env.sim, self.env.envs[env_id], self.cams[env_id],
+            img = self.env.gym.get_camera_image(self.env.sim, self.env.envs[env_id], self.cams[0],
                                             gymapi.IMAGE_SEGMENTATION)
             w, h = img.shape
             segmentation_images.append(

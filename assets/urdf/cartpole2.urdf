@@ -76,7 +76,7 @@
     <origin xyz="0 0 0.15" rpy="0 0 0"/>
     <parent link="cart"/>
     <child link="camera_mount"/>
-    <limit effort="0.1" lower="-1.57" upper="1.57" velocity="0.01"/>
+    <limit effort="1000" lower="-1.57" upper="1.57" velocity="100"/>
   </joint>
 
   <joint name="camera_mount_to_camera_tilt" type="revolute">
@@ -84,7 +84,7 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <parent link="camera_mount"/>
     <child link="camera"/>
-    <limit effort="0.1" lower="-1.57" upper="1.57" velocity="0.01"/>
+    <limit effort="1000" lower="-1.57" upper="1.57" velocity="100"/>
   </joint>
 
 
@@ -132,7 +132,7 @@
     <parent link="slider1"/>
     <child link="slider2"/>
     <!-- <limit effort="1000.0" lower="-10" upper="10" velocity="100"/> -->
-    <limit effort="1000.0" lower="0" upper="0" velocity="100"/>
+    <limit effort="1000.0" lower="-10" upper="10" velocity="100"/>
   </joint>
 
   <joint name="slider2_to_cart" type="prismatic">
@@ -141,7 +141,7 @@
     <parent link="slider2"/>
     <child link="cart"/>
     <!-- <limit effort="1000.0" lower="-10" upper="10" velocity="100"/> -->
-    <limit effort="1000.0" lower="0" upper="0" velocity="100"/>
+    <limit effort="1000.0" lower="-10" upper="10" velocity="100"/>
   </joint>
   
 </robot>

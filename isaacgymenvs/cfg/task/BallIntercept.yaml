@@ -3,6 +3,8 @@ name: BallIntercept
 
 physics_engine: ${..physics_engine}
 
+render_fpv_vid: True
+
 # if given, will override the device setting in gym.
 env:
   numEnvs: 4096 #${resolve_default:4096,${...num_envs}}

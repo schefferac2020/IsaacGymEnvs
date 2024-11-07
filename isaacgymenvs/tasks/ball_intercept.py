@@ -37,6 +37,10 @@ from isaacgym.torch_utils import *
 
 from isaacgymenvs.utils.torch_jit_utils import to_torch, torch_rand_float, tensor_clamp, torch_random_dir_2
 from .base.vec_task import VecTask
+import cv2
+import random as randy
+
+
 
 
 def _indent_xml(elem, level=0):
@@ -59,34 +63,31 @@ class BallIntercept(VecTask):
 
     def __init__(self, cfg, rl_device, sim_device, graphics_device_id, headless, virtual_screen_capture, force_render):
         self.cfg = cfg
+        
 
+        
         self.max_episode_length = self.cfg["env"]["maxEpisodeLength"]
         self.action_speed_scale = self.cfg["env"]["actionSpeedScale"]
         self.debug_viz = self.cfg["env"]["enableDebugVis"]
         self.max_push_effort = self.cfg["env"]["maxEffort"]
+        
+        self.fpv_render = (self.cfg["render_fpv_vid"] and not headless) # render a video if it's testing and not headless
+        self.fpv_imgs = []
+        self.fpv_env = 0
 
-        sensors_per_env = 3
         actors_per_env = 1
         dofs_per_env = 4
-        bodies_per_env = 7 + 1
         
         self.a = 0
 
-        # Observations:
-        # 0:3 - activated DOF positions
-        # 3:6 - activated DOF velocities
-        # 6:9 - ball position
-        # 9:12 - ball linear velocity
-        # 12:15 - sensor force (same for each sensor)
-        # 15:18 - sensor torque 1
-        # 18:21 - sensor torque 2
-        # 21:24 - sensor torque 3
         self.cfg["env"]["numObservations"] = 3
 
         # Actions: target velocities for the 3 actuated DOFs
         self.cfg["env"]["numActions"] = 4
 
         super().__init__(config=self.cfg, rl_device=rl_device, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless, virtual_screen_capture=virtual_screen_capture, force_render=force_render)
+
+
 
         self.root_tensor = self.gym.acquire_actor_root_state_tensor(self.sim)
         self.dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
@@ -113,13 +114,8 @@ class BallIntercept(VecTask):
         self.ball_orientations = vec_root_tensor[..., 1, 3:7]
         self.ball_linvels = vec_root_tensor[..., 1, 7:10]
         self.ball_angvels = vec_root_tensor[..., 1, 10:13]
-
-        # self.dof_states = vec_dof_tensor
-        # self.dof_positions = vec_dof_tensor[..., 0]
-        # self.dof_velocities = vec_dof_tensor[..., 1]
-
-        # self.sensor_forces = vec_sensor_tensor[..., 0:3]
-        # self.sensor_torques = vec_sensor_tensor[..., 3:6]
+        
+        self.gym.render_all_camera_sensors(self.sim)
 
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -134,6 +130,8 @@ class BallIntercept(VecTask):
 
         # vis
         self.axes_geom = gymutil.AxesGeometry(0.2)
+        
+
         
 
     def create_sim(self):
@@ -261,6 +259,31 @@ class BallIntercept(VecTask):
         
         self.initialize_sensors()
         
+        if self.fpv_render == True: 
+            self.initialize_fpv_cameras(env_ids=[self.fpv_env])
+        
+    def initialize_fpv_cameras(self, env_ids):
+        self.cams = {"fpv": []}
+        self.camera_sensors = {}
+        
+        from .sensors.attached_camera_sensor import AttachedCameraSensor
+        
+        camera_label = "fpv"
+        camera_pose = np.array([0, 0, 0])
+        camera_rpy = np.array([0, np.pi/2, 0])
+        
+        self.camera_sensors[camera_label] = AttachedCameraSensor(self)
+        self.camera_sensors[camera_label].initialize(camera_label, camera_pose, camera_rpy, env_ids=env_ids)
+    
+    
+    def get_fpv_rgb_images(self, env_ids):
+        rgb_images = {}
+        for camera_name in ["fpv"]: #TODO: make this a config too
+            rgb_images[camera_name] = self.camera_sensors[camera_name].get_rgb_images(env_ids)
+        return rgb_images
+        
+        
+        
     def initialize_sensors(self):
         '''Initialize the Sensors
         
@@ -280,17 +303,6 @@ class BallIntercept(VecTask):
         
     def compute_observations(self):
         '''These are the observations that are sent into the policy'''
-        #print("~!~!~!~! Computing obs")
-
-        #print(self.dof_states[:, actuated_dof_indices, :])
-        
-        # print("Right before")
-        # Pan Angle: self.dof_positions[0][2]
-        # Tilt Angle: self.dof_positions[0][3]
-        
-        # Get Transform from Ball to world
-        # T_WB = np.eye(4)
-        # T_WB[:3, 3] = self.ball_positions[0].cpu()
         
         self.pre_obs_buf = []
         for sensor in self.sensors:
@@ -299,6 +311,7 @@ class BallIntercept(VecTask):
         self.pre_obs_buf = torch.reshape(torch.cat(self.pre_obs_buf, dim=-1), (self.num_envs, -1))
         self.obs_buf[:] = self.pre_obs_buf
             
+        
 
         # self.obs_buf[..., 0:3] = 0 #self.dof_positions[..., actuated_dof_indices]
         # self.obs_buf[..., 3:6] = 0 #self.dof_velocities[..., actuated_dof_indices]
@@ -371,7 +384,7 @@ class BallIntercept(VecTask):
         This is where the actions are applied to the robot
         
         
-        we are using a type of velocity control now I think? 
+        we are using a type of velocity control now
         '''
         
         
@@ -406,24 +419,52 @@ class BallIntercept(VecTask):
         # self.gym.set_dof_actuation_force_tensor(self.sim, forces)
 
     def post_physics_step(self):
+        '''
+            Description description blah blah blah
+        '''
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_dof_state_tensor(self.sim)
+        self.gym.refresh_force_sensor_tensor(self.sim)
+        
+        
+        
         # TODO: I don't know why these two lines are required now? 
         self.gym.simulate(self.sim)
         self.gym.fetch_results(self.sim, True)
 
         self.progress_buf += 1
 
-        self.gym.refresh_actor_root_state_tensor(self.sim)
-        self.gym.refresh_dof_state_tensor(self.sim)
-        self.gym.refresh_force_sensor_tensor(self.sim)
-        
-        
-        # Prepare quantities
-        # self.base_pos[:]
-        
-        
-
         self.compute_observations()
         self.compute_reward()
+        
+        # Render images at this timestep if we're in TESTING mode and are not HEADLESS
+        if self.fpv_render:
+            self.render_fpv_video()
+                
+    def render_fpv_video(self):
+        self.gym.step_graphics(self.sim)
+        self.gym.render_all_camera_sensors(self.sim)
+            
+        rgb_images = self.get_fpv_rgb_images(env_ids=[self.fpv_env])
+        
+        rgb_image_np = rgb_images["fpv"].cpu().numpy()[0]  # Convert to NumPy
+        rgb_image_np = (rgb_image_np[..., :3]*255).astype(np.uint8)
+        self.fpv_imgs.append(rgb_image_np)
+        
+        # If env0 is done, write the images to a movie and output it
+        reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+        if self.fpv_env in reset_env_ids: 
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fps = 20 #int(1.0/self.dt)
+            out = cv2.VideoWriter("./videos/fpv.mp4", fourcc, fps, (rgb_image_np.shape[0], rgb_image_np.shape[1]))
+            
+            for image in self.fpv_imgs:
+                out.write(image)
+            out.release()
+            print("example video has been saved to: ./videos/fpv.mp4")
+            cv2.destroyAllWindows()
+            
+            
 #####################################################################
 ###=========================jit functions=========================###
 #####################################################################
