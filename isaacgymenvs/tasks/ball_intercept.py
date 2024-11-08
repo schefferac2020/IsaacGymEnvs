@@ -81,7 +81,10 @@ class BallIntercept(VecTask):
         
         self.a = 0
 
-        self.cfg["env"]["numObservations"] = 3
+        self.cfg["env"]["numObservations"] = (3 + 4 + 2 + 2)*2
+        self.prev_obs = None
+        
+       
 
         # Actions: target velocities for the 3 actuated DOFs
         self.cfg["env"]["numActions"] = 4
@@ -98,6 +101,7 @@ class BallIntercept(VecTask):
         vec_dof_tensor = gymtorch.wrap_tensor(self.dof_state_tensor).view(self.num_envs, dofs_per_env, 2)
         self.dof_positions = vec_dof_tensor[..., 0]
         self.dof_velocities = vec_dof_tensor[..., 1]
+        
         
 
         self.root_states = vec_root_tensor
@@ -302,12 +306,14 @@ class BallIntercept(VecTask):
 
         self.sensors = []
         
-        sensor_names = ["PointCameraSensor"] #TODO: Make this a cfg
+        sensor_names = ["PointCameraSensor", "LastActionSensor", "JointPositionSensor", "JointVelocitySensor"] #TODO: Make this a cfg
         sensor_args = {} #TODO: This likely is not right
         for sensor_name in sensor_names:
             if sensor_name in ALL_SENSORS.keys():
                 print("Initializing this sensor: ", sensor_name)
                 self.sensors.append(ALL_SENSORS[sensor_name](self, **sensor_args))
+            else:
+                print(f"ERR: {sensor_name} does not exist")
         
     def compute_observations(self):
         '''These are the observations that are sent into the policy'''
@@ -316,8 +322,18 @@ class BallIntercept(VecTask):
         for sensor in self.sensors:
             self.pre_obs_buf += [sensor.get_observation()]
             
-        self.pre_obs_buf = torch.reshape(torch.cat(self.pre_obs_buf, dim=-1), (self.num_envs, -1))
+        curr_timestep_obs = torch.reshape(torch.cat(self.pre_obs_buf, dim=-1), (self.num_envs, -1))
+        if self.prev_obs is None:
+            self.prev_obs = curr_timestep_obs
+        self.pre_obs_buf = torch.reshape(torch.cat([curr_timestep_obs, self.prev_obs], dim=-1), (self.num_envs, -1))
+        self.prev_obs = curr_timestep_obs
+        
         self.obs_buf[:] = self.pre_obs_buf
+        
+        print("This is an observation example: ", len(self.obs_buf[0]))
+        print("This is an observation example: ", self.obs_buf[0])
+        print("1st half: ", self.obs_buf[0][:11])
+        print("2nd half: ", self.obs_buf[0][11:])
 
         return self.obs_buf
 
@@ -399,6 +415,8 @@ class BallIntercept(VecTask):
         we are using a type of velocity control now
         '''
         
+        self.actions = _actions
+        
         
         # resets
         reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
@@ -424,9 +442,7 @@ class BallIntercept(VecTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_force_sensor_tensor(self.sim)
-        
-        
-        
+                
         # TODO: I don't know why these two lines are required now? 
         self.gym.simulate(self.sim)
         self.gym.fetch_results(self.sim, True)

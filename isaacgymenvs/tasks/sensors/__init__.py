@@ -1,8 +1,8 @@
 from .sensor import Sensor
 from .attached_camera_sensor import AttachedCameraSensor
 # from .floating_camera_sensor import FloatingCameraSensor
-# from .joint_position_sensor import JointPositionSensor
-# from .joint_velocity_sensor import JointVelocitySensor
+from .joint_position_sensor import JointPositionSensor
+from .joint_velocity_sensor import JointVelocitySensor
 # from .orientation_sensor import OrientationSensor
 # from .heightmap_sensor import HeightmapSensor
 # from .rc_sensor import RCSensor
@@ -22,5 +22,7 @@ ALL_SENSORS = { "AttachedCameraSensor": AttachedCameraSensor,
                 "ActionSensor": ActionSensor,
                 "LastActionSensor": LastActionSensor,
                 "ObjectSensor": ObjectSensor,
-                "PointCameraSensor": PointCameraSensor
+                "PointCameraSensor": PointCameraSensor,
+                "JointPositionSensor": JointPositionSensor,
+                "JointVelocitySensor": JointVelocitySensor,
             }
